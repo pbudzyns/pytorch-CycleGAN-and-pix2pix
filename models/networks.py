@@ -4,6 +4,7 @@ from torch.nn import init
 import functools
 from torch.optim import lr_scheduler
 
+from .animegan import AnimeGanGenerator
 
 ###############################################################################
 # Helper Functions
@@ -155,6 +156,8 @@ def define_G(input_nc, output_nc, ngf, netG, norm='batch', use_dropout=False, in
         net = UnetGenerator(input_nc, output_nc, 7, ngf, norm_layer=norm_layer, use_dropout=use_dropout)
     elif netG == 'unet_256':
         net = UnetGenerator(input_nc, output_nc, 8, ngf, norm_layer=norm_layer, use_dropout=use_dropout)
+    elif netG == 'animegan':
+        net = AnimeGanGenerator()
     else:
         raise NotImplementedError('Generator model name [%s] is not recognized' % netG)
     return init_net(net, init_type, init_gain, gpu_ids)
