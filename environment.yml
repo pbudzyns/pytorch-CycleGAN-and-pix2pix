@@ -1,17 +1,19 @@
-name: pytorch-CycleGAN-and-pix2pix
+name: CycleGAN
 channels:
 - pytorch
+- nvidia
 - defaults
 dependencies:
 - python=3.8
-- pytorch=1.8.1
+- pytorch
+- torchvision
+- pytorch-cuda=11.7
 - scipy
 - pip
 - pip:
+  - lpips
   - dominate==2.6.0
-  - torchvision==0.9.1
   - Pillow==8.0.1
   - numpy==1.19.2
   - visdom==0.1.8
   - wandb==0.12.18
-
