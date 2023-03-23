@@ -5,7 +5,7 @@ channels:
 - defaults
 dependencies:
 - python=3.8
-- pytorch
+- pytorch>=2.0.0
 - torchvision
 - pytorch-cuda=11.7
 - scipy

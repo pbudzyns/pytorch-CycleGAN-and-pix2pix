@@ -46,6 +46,7 @@ class CycleGANLpipsModel(BaseModel):
             parser.add_argument('--lambda_Con', type=float, default=5.0, help='weight for perceptual content loss')
             parser.add_argument('--lambda_Gra', type=float, default=10.0, help='weight for style Gram matrix loss')
             parser.add_argument('--lambda_identity', type=float, default=0.5, help='use identity mapping. Setting lambda_identity other than 0 has an effect of scaling the weight of the identity mapping loss. For example, if the weight of the identity loss should be 10 times smaller than the weight of the reconstruction loss, please set lambda_identity = 0.1')
+            parser.add_argument('--compile', action='store_true', help='compile the inner modules using Torch 2.0 features')
 
         return parser
 
@@ -96,6 +97,8 @@ class CycleGANLpipsModel(BaseModel):
             self.criterionCycle = torch.nn.L1Loss()
             self.criterionIdt = torch.nn.L1Loss()
             self.criterionLpips = lpips.LPIPS(net='vgg').to(self.device)
+            if self.opt.compile:
+                self.criterionLpips.net = torch.compile(self.criterionLpips.net)
             self.criterionStyle = StyleLoss(self.criterionLpips.net)
             # initialize optimizers; schedulers will be automatically created by function <BaseModel.setup>.
             self.optimizer_G = torch.optim.Adam(
@@ -110,6 +113,14 @@ class CycleGANLpipsModel(BaseModel):
             )
             self.optimizers.append(self.optimizer_G)
             self.optimizers.append(self.optimizer_D)
+
+        if self.opt.compile:
+            self.netG_A = torch.compile(self.netG_A)
+            self.netG_B = torch.compile(self.netG_B)
+            if self.isTrain:
+                self.netD_A = torch.compile(self.netD_A)
+                self.netD_B = torch.compile(self.netD_B)
+
 
     def set_input(self, input):
         """Unpack input data from the dataloader and perform necessary pre-processing steps.
