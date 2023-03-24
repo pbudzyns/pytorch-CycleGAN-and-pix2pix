@@ -1,7 +1,10 @@
 import os
-import torch
 from collections import OrderedDict
 from abc import ABC, abstractmethod
+
+import torch
+import torch._dynamo
+
 from . import networks
 
 
@@ -153,7 +156,8 @@ class BaseModel(ABC):
                 save_path = os.path.join(self.save_dir, save_filename)
                 net = getattr(self, 'net' + name)
 
-                if len(self.gpu_ids) > 0 and torch.cuda.is_available():
+                if ((len(self.gpu_ids) > 0 and torch.cuda.is_available())
+                        or isinstance(net, torch._dynamo.OptimizedModule)):
                     torch.save(net.module.cpu().state_dict(), save_path)
                     net.cuda(self.gpu_ids[0])
                 else:
@@ -184,7 +188,8 @@ class BaseModel(ABC):
                 load_filename = '%s_net_%s.pth' % (epoch, name)
                 load_path = os.path.join(self.save_dir, load_filename)
                 net = getattr(self, 'net' + name)
-                if isinstance(net, torch.nn.DataParallel):
+                if (isinstance(net, torch.nn.DataParallel)
+                        or isinstance(net, torch._dynamo.OptimizedModule)):
                     net = net.module
                 print('loading the model from %s' % load_path)
                 # if you are using PyTorch newer than 0.4 (e.g., built from

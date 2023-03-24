@@ -117,13 +117,17 @@ class CycleGANLpipsModel(BaseModel):
             self.optimizers.append(self.optimizer_G)
             self.optimizers.append(self.optimizer_D)
 
-        if self.opt.compile:
-            self.netG_A = torch.compile(self.netG_A)
-            self.netG_B = torch.compile(self.netG_B)
-            if self.isTrain:
-                self.netD_A = torch.compile(self.netD_A)
-                self.netD_B = torch.compile(self.netD_B)
+    def setup(self, opt):
+        BaseModel.setup(self, opt)
+        if opt.compile:
+            self.compile()
 
+    def compile(self):
+        self.netG_A = torch.compile(self.netG_A)
+        self.netG_B = torch.compile(self.netG_B)
+        if self.isTrain:
+            self.netD_A = torch.compile(self.netD_A)
+            self.netD_B = torch.compile(self.netD_B)
 
     def set_input(self, input):
         """Unpack input data from the dataloader and perform necessary pre-processing steps.
