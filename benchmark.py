@@ -9,7 +9,7 @@ from models import BaseModel, create_model
 from options.train_options import TrainOptions
 
 
-def run_test_train_loop(dataset: BaseDataset, model: BaseModel, opt: argparse.Namespace) -> None:
+def run_train_loop(dataset: BaseDataset, model: BaseModel, opt: argparse.Namespace) -> None:
     for epoch in range(opt.epoch_count, opt.n_epochs + opt.n_epochs_decay + 1):
         model.update_learning_rate()
         for i, data in enumerate(dataset):
@@ -55,7 +55,7 @@ def benchmark_single_model(
     for num_threads in threads_range:
         results.append(
             benchmark.Timer(
-                stmt='run_test_train_loop(dataset, model, opt)',
+                stmt='run_train_loop(dataset, model, opt)',
                 setup='from __main__ import run_test_train_loop',
                 globals={'dataset': dataset, 'model': model, 'opt': options},
                 num_threads=num_threads,
