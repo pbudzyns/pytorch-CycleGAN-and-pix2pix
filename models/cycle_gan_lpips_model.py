@@ -2,6 +2,7 @@ import itertools
 
 import lpips
 import torch
+import torchvision.transforms
 
 from util.image_pool import ImagePool
 from .base_model import BaseModel
@@ -43,8 +44,9 @@ class CycleGANLpipsModel(BaseModel):
         if is_train:
             parser.add_argument('--lambda_A', type=float, default=10.0, help='weight for cycle loss (A -> B -> A)')
             parser.add_argument('--lambda_B', type=float, default=10.0, help='weight for cycle loss (B -> A -> B)')
-            parser.add_argument('--lambda_Con', type=float, default=5.0, help='weight for perceptual content loss')
-            parser.add_argument('--lambda_Gra', type=float, default=10.0, help='weight for style Gram matrix loss')
+            parser.add_argument('--lambda_Con', type=float, default=0.2, help='weight for perceptual content loss')
+            parser.add_argument('--lambda_Gra', type=float, default=1000.0, help='weight for style Gram matrix loss')
+            parser.add_argument('--lambda_Col', type=float, default=2.0, help='weight for color loss')
             parser.add_argument('--lambda_identity', type=float, default=0.5, help='use identity mapping. Setting lambda_identity other than 0 has an effect of scaling the weight of the identity mapping loss. For example, if the weight of the identity loss should be 10 times smaller than the weight of the reconstruction loss, please set lambda_identity = 0.1')
             parser.add_argument('--compile', action='store_true', help='compile the inner modules using Torch 2.0 features')
 
@@ -99,7 +101,8 @@ class CycleGANLpipsModel(BaseModel):
             self.criterionLpips = lpips.LPIPS(net='vgg').to(self.device)
             if self.opt.compile:
                 self.criterionLpips.net = torch.compile(self.criterionLpips.net)
-            self.criterionStyle = StyleLoss(self.criterionLpips.net)
+            self.criterionGram = GrayGramLoss(self.criterionLpips.net).to(self.device)
+            self.criterionColor = ColorLoss().to(self.device)
             # initialize optimizers; schedulers will be automatically created by function <BaseModel.setup>.
             self.optimizer_G = torch.optim.Adam(
                 itertools.chain(self.netG_A.parameters(), self.netG_B.parameters()),
@@ -181,6 +184,7 @@ class CycleGANLpipsModel(BaseModel):
         lambda_B = self.opt.lambda_B
         lambda_Con = self.opt.lambda_Con
         lambda_Gra = self.opt.lambda_Gra
+        lambda_Col = self.opt.lambda_Col
         # Identity loss
         if lambda_idt > 0:
             # G_A should be identity if real_B is fed: ||G_A(B) - B||
@@ -196,11 +200,13 @@ class CycleGANLpipsModel(BaseModel):
         # GAN loss D_A(G_A(A))
         self.loss_G_A = self.criterionGAN(self.netD_A(self.fake_B), True)
         self.loss_G_A_Con = self.criterionLpips(self.real_A, self.fake_B).mean() * lambda_Con
-        self.loss_G_A_Gra = self.criterionStyle(self.fake_B, self.real_B) * lambda_Gra
+        self.loss_G_A_Gra = self.criterionGram(self.fake_B, self.real_B) * lambda_Gra
+        self.loss_G_A_Col = self.criterionColor(self.real_A, self.fake_B) * lambda_Col
         # GAN loss D_B(G_B(B))
         self.loss_G_B = self.criterionGAN(self.netD_B(self.fake_A), True)
         self.loss_G_B_Con = self.criterionLpips(self.real_B, self.fake_A).mean() * lambda_Con
-        self.loss_G_B_Gra = self.criterionStyle(self.fake_A, self.real_A) * lambda_Gra
+        self.loss_G_B_Gra = self.criterionGram(self.fake_A, self.real_A) * lambda_Gra
+        self.loss_G_B_Col = self.criterionColor(self.real_B, self.fake_A) * lambda_Col
         # Forward cycle loss || G_B(G_A(A)) - A||
         self.loss_cycle_A = self.criterionCycle(self.rec_A, self.real_A) * lambda_A
         # Backward cycle loss || G_A(G_B(B)) - B||
@@ -209,8 +215,10 @@ class CycleGANLpipsModel(BaseModel):
         self.loss_G = sum((
             self.loss_G_A,
             self.loss_G_A_Con,
+            self.loss_G_A_Col,
             self.loss_G_B,
             self.loss_G_B_Con,
+            self.loss_G_B_Col,
             self.loss_cycle_A,
             self.loss_cycle_B,
             self.loss_idt_A,
@@ -235,33 +243,83 @@ class CycleGANLpipsModel(BaseModel):
         self.optimizer_D.step()  # update D_A and D_B's weights
 
 
-class StyleLoss(torch.nn.Module):
+class GrayGramLoss(torch.nn.Module):
+    """Computes style loss between generated image
+    and a grayscale image from target domain.
+
+    """
 
     def __init__(self, feature_encoder: torch.nn.Module):
         super().__init__()
         self.criterion = torch.nn.L1Loss()
+        self.normalize = lpips.ScalingLayer()
+        self.to_gray = torchvision.transforms.Grayscale()
         self.net = feature_encoder
 
     @classmethod
-    def gram_matrix(cls, features) -> torch.Tensor:
+    def gram_matrix(cls, features: torch.Tensor) -> torch.Tensor:
         # Source: https://pytorch.org/tutorials/advanced/neural_style_tutorial.html
         a, b, c, d = features.size()  # a=batch size(=1)
         # b=number of feature maps
         # (c,d)=dimensions of a f. map (N=c*d)
 
-        features = features.view(a * b, c * d)  # resise F_XL into \hat F_XL
+        features = features.view(a * b, c * d)  # resize F_XL into \hat F_XL
 
-        G = torch.mm(features, features.t())  # compute the gram product
+        gram = torch.mm(features, features.t())  # compute the gram product
 
         # we 'normalize' the values of the gram matrix
         # by dividing by the number of element in each feature maps.
-        return G.div(a * b * c * d)
+        return gram.div(a * b * c * d)
 
-    def forward(self, source_tensor, target_tensor):
-        features_source = self.net(source_tensor).relu4_3
-        features_target = self.net(target_tensor).relu4_3.detach()
+    def forward(self, source_tensor: torch.Tensor, target_tensor: torch.Tensor) -> torch.Tensor:
+        # Expects inputs in range [-1, 1].
+        features_source = self.net(self.normalize(source_tensor)).relu4_3
+        features_target = self.net(self.normalize(self.to_gray(target_tensor))).relu4_3.detach()
 
         gram_source = self.gram_matrix(features_source)
         gram_target = self.gram_matrix(features_target)
 
         return self.criterion(gram_source, gram_target)
+
+
+class ColorLoss(torch.nn.Module):
+    """Color Loss Implementation From AnimeGAN
+    Source: https://github.com/ptran1203/pytorch-animeGAN/blob/master/utils/image_processing.py
+
+    """
+    def __init__(self):
+        super(ColorLoss, self).__init__()
+        self.l1 = torch.nn.L1Loss()
+        self.huber = torch.nn.SmoothL1Loss()
+        self.rgb_to_yuv_kernel = torch.nn.Parameter(
+            data=torch.tensor([
+                [0.299, -0.14714119, 0.61497538],
+                [0.587, -0.28886916, -0.51496512],
+                [0.114, 0.43601035, -0.10001026]
+            ]),
+            requires_grad=False,
+        )
+
+    def rgb_to_yuv(self, image: torch.Tensor) -> torch.Tensor:
+        # Expects inputs in range [-1, 1].
+        image = (image + 1.0) / 2.0
+
+        yuv_img = torch.tensordot(
+            image,
+            self.rgb_to_yuv_kernel,
+            dims=([image.ndim - 3], [0]),
+        )
+
+        return yuv_img
+
+    def forward(self, image: torch.Tensor, image_g: torch.Tensor) -> torch.Tensor:
+        # Expects inputs in range [-1, 1].
+        image = self.rgb_to_yuv(image)
+        image_g = self.rgb_to_yuv(image_g)
+
+        # After convert to yuv, both images have channel last.
+        return (
+            self.l1(image[:, :, :, 0], image_g[:, :, :, 0])
+            + self.huber(image[:, :, :, 1], image_g[:, :, :, 1])
+            + self.huber(image[:, :, :, 2], image_g[:, :, :, 2])
+        )
