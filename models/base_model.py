@@ -2,6 +2,7 @@ import os
 from collections import OrderedDict
 from abc import ABC, abstractmethod
 
+import mlflow
 import torch
 import torch._dynamo
 
@@ -98,6 +99,13 @@ class BaseModel(ABC):
                 net = getattr(self, 'net' + name)
                 net.eval()
 
+    def train(self):
+        """Make models train mode"""
+        for name in self.model_names:
+            if isinstance(name, str):
+                net = getattr(self, 'net' + name)
+                net.train()
+
     def test(self):
         """Forward function used in test time.
 
@@ -176,6 +184,15 @@ class BaseModel(ABC):
                 state_dict.pop('.'.join(keys))
         else:
             self.__patch_instance_norm_state_dict(state_dict, getattr(module, key), keys, i + 1)
+
+    def log_networks_to_mlflow(self, epoch):
+        for name in self.model_names:
+            if isinstance(name, str):
+                net = getattr(self, 'net' + name)
+                if (isinstance(net, torch.nn.DataParallel)
+                        or isinstance(net, torch._dynamo.OptimizedModule)):
+                    net = net.module
+                mlflow.pytorch.log_model(net, f"{epoch}_net_{name}")
 
     def load_networks(self, epoch):
         """Load all the networks from the disk.

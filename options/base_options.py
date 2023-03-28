@@ -57,6 +57,12 @@ class BaseOptions():
         # wandb parameters
         parser.add_argument('--use_wandb', action='store_true', help='if specified, then init wandb logging')
         parser.add_argument('--wandb_project_name', type=str, default='CycleGAN-and-pix2pix', help='specify wandb project name')
+        # mlflow parameters
+        parser.add_argument('--use_mlflow', action='store_true', help='log training options and metrics to mlflow instance')
+        parser.add_argument('--mlflow_experiment_name', type=str, default='CycleGAN', help='mlflow experiment name')
+        parser.add_argument('--mlflow_run_name', type=str, help='mlflow run name, set to random name if not specified')
+        parser.add_argument('--mlflow_save_all_models', action='store_true', help="logs all models to mlflow if selected. Otherwise only 'latest'")
+        parser.add_argument('--mlflow_tracking_uri', type=str, help="URI to mlflow tracking instance")
         self.initialized = True
         return parser
 
