@@ -219,9 +219,11 @@ class CycleGANLpipsModel(BaseModel):
         self.loss_G = sum((
             self.loss_G_A,
             self.loss_G_A_Con,
+            self.loss_G_A_Gra,
             self.loss_G_A_Col,
             self.loss_G_B,
             self.loss_G_B_Con,
+            self.loss_G_B_Gra,
             self.loss_G_B_Col,
             self.loss_cycle_A,
             self.loss_cycle_B,
