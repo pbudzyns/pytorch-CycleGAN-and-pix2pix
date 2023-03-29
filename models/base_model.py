@@ -189,10 +189,13 @@ class BaseModel(ABC):
         for name in self.model_names:
             if isinstance(name, str):
                 net = getattr(self, 'net' + name)
-                if (isinstance(net, torch.nn.DataParallel)
+                if ((len(self.gpu_ids) > 0 and torch.cuda.is_available())
                         or isinstance(net, torch._dynamo.OptimizedModule)):
-                    net = net.module
-                mlflow.pytorch.log_state_dict(net.state_dict(), f"{epoch}_net_{name}")
+                    state_dict = net.module.cpu().state_dict()
+                    net.cuda(self.gpu_ids[0])
+                else:
+                    state_dict = net.cpu().state_dict()
+                mlflow.pytorch.log_state_dict(state_dict, f"{epoch}_net_{name}")
 
     def load_networks(self, epoch):
         """Load all the networks from the disk.
