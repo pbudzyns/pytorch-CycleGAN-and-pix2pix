@@ -21,6 +21,7 @@ See frequently asked questions at: https://github.com/junyanz/pytorch-CycleGAN-a
 import time
 
 import mlflow
+import torch
 
 from data import create_dataset
 from models import create_model
@@ -41,7 +42,8 @@ def setup_mlflow(options):
 def log_mlflow_artifacts(model, epoch, options):
     model.log_networks_to_mlflow(epoch if options.mlflow_save_all_models else 'latest')
     model.eval()
-    image_paths = generate_test_images_during_training(model, options, epoch)
+    with torch.no_grad():
+        image_paths = generate_test_images_during_training(model, options, epoch)
     model.train()
     for image_path in image_paths:
         mlflow.log_artifact(image_path)
