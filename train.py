@@ -28,6 +28,25 @@ from options.train_options import TrainOptions
 from util.testing import generate_test_images_during_training
 from util.visualizer import Visualizer
 
+
+def setup_mlflow(options):
+    print(f'Setting up MLFlow experiment "{options.mlflow_experiment_name}" tracking to {options.mlflow_tracking_uri}')
+    mlflow.set_tracking_uri(options.mlflow_tracking_uri)
+    mlflow.set_experiment(options.mlflow_experiment_name)
+    if options.mlflow_run_name:
+        mlflow.start_run(run_name=options.mlflow_run_name)
+    mlflow.log_params(vars(options))
+
+
+def log_mlflow_artifacts(model, epoch, options):
+    model.log_networks_to_mlflow(epoch if options.mlflow_save_all_models else 'latest')
+    model.eval()
+    image_paths = generate_test_images_during_training(model, options, epoch)
+    model.train()
+    for image_path in image_paths:
+        mlflow.log_artifact(image_path)
+
+
 if __name__ == '__main__':
     opt = TrainOptions().parse()   # get training options
     dataset = create_dataset(opt)  # create a dataset given opt.dataset_mode and other options
@@ -40,12 +59,7 @@ if __name__ == '__main__':
     total_iters = 0                # the total number of training iterations
 
     if opt.use_mlflow:
-        print(f'Setting up MLFlow experiment "{opt.mlflow_experiment_name}" tracking to {opt.mlflow_tracking_uri}')
-        mlflow.set_tracking_uri(opt.mlflow_tracking_uri)
-        mlflow.set_experiment(opt.mlflow_experiment_name)
-        if opt.mlflow_run_name:
-            mlflow.start_run(run_name=opt.mlflow_run_name)
-        mlflow.log_params(vars(opt))
+        setup_mlflow(opt)
 
     for epoch in range(opt.epoch_count, opt.n_epochs + opt.n_epochs_decay + 1):    # outer loop for different epochs; we save the model by <epoch_count>, <epoch_count>+<save_latest_freq>
         epoch_start_time = time.time()  # timer for entire epoch
@@ -89,11 +103,6 @@ if __name__ == '__main__':
             model.save_networks(epoch)
 
             if opt.use_mlflow:
-                model.log_networks_to_mlflow(epoch if opt.mlflow_save_all_models else 'latest')
-                model.eval()
-                image_paths = generate_test_images_during_training(model, opt, epoch)
-                model.train()
-                for image_path in image_paths:
-                    mlflow.log_artifact(image_path)
+                log_mlflow_artifacts(model, epoch, opt)
 
         print('End of epoch %d / %d \t Time Taken: %d sec' % (epoch, opt.n_epochs + opt.n_epochs_decay, time.time() - epoch_start_time))

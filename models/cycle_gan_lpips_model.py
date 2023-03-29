@@ -44,9 +44,9 @@ class CycleGANLpipsModel(BaseModel):
         if is_train:
             parser.add_argument('--lambda_A', type=float, default=10.0, help='weight for cycle loss (A -> B -> A)')
             parser.add_argument('--lambda_B', type=float, default=10.0, help='weight for cycle loss (B -> A -> B)')
-            parser.add_argument('--lambda_Con', type=float, default=0.2, help='weight for perceptual content loss')
-            parser.add_argument('--lambda_Gra', type=float, default=1000.0, help='weight for style Gram matrix loss')
-            parser.add_argument('--lambda_Col', type=float, default=2.0, help='weight for color loss')
+            parser.add_argument('--lambda_content', type=float, default=0.2, help='weight for perceptual content loss')
+            parser.add_argument('--lambda_style', type=float, default=1000.0, help='weight for style Gram matrix loss')
+            parser.add_argument('--lambda_color', type=float, default=2.0, help='weight for color loss')
             parser.add_argument('--lambda_identity', type=float, default=0.5, help='use identity mapping. Setting lambda_identity other than 0 has an effect of scaling the weight of the identity mapping loss. For example, if the weight of the identity loss should be 10 times smaller than the weight of the reconstruction loss, please set lambda_identity = 0.1')
             parser.add_argument('--compile', action='store_true', help='compile the inner modules using Torch 2.0 features')
 
@@ -98,10 +98,10 @@ class CycleGANLpipsModel(BaseModel):
             self.criterionGAN = networks.GANLoss(opt.gan_mode).to(self.device)  # define GAN loss.
             self.criterionCycle = torch.nn.L1Loss()
             self.criterionIdt = torch.nn.L1Loss()
-            self.criterionLpips = lpips.LPIPS(net='vgg').to(self.device)
+            self.criterionContent = lpips.LPIPS(net='vgg').to(self.device)
             if self.opt.compile:
-                self.criterionLpips.net = torch.compile(self.criterionLpips.net)
-            self.criterionGram = GrayGramLoss(self.criterionLpips.net).to(self.device)
+                self.criterionContent.net = torch.compile(self.criterionContent.net)
+            self.criterionStyle = GrayGramLoss(self.criterionContent.net).to(self.device)
             self.criterionColor = ColorLoss().to(self.device)
             # initialize optimizers; schedulers will be automatically created by function <BaseModel.setup>.
             self.optimizer_G = torch.optim.Adam(
@@ -116,6 +116,14 @@ class CycleGANLpipsModel(BaseModel):
             )
             self.optimizers.append(self.optimizer_G)
             self.optimizers.append(self.optimizer_D)
+
+            self.loss_idt_A, self.loss_idt_B = 0, 0
+            self.loss_G_A_Content, self.loss_G_B_Content = 0, 0
+            self.loss_G_A_Style, self.loss_G_B_Style = 0, 0
+            self.loss_G_A_Color, self.loss_G_B_Color = 0, 0
+            self.loss_names.extend(
+                ("G_A_Content", "G_B_Content", "G_A_Style", "G_B_Style", "G_A_Color", "G_B_Color")
+            )
 
     def setup(self, opt):
         BaseModel.setup(self, opt)
@@ -183,12 +191,12 @@ class CycleGANLpipsModel(BaseModel):
 
     def backward_G(self):
         """Calculate the loss for generators G_A and G_B"""
-        lambda_idt = self.opt.lambda_identity
         lambda_A = self.opt.lambda_A
         lambda_B = self.opt.lambda_B
-        lambda_Con = self.opt.lambda_Con
-        lambda_Gra = self.opt.lambda_Gra
-        lambda_Col = self.opt.lambda_Col
+        lambda_idt = self.opt.lambda_identity
+        lambda_content = self.opt.lambda_content
+        lambda_style = self.opt.lambda_style
+        lambda_color = self.opt.lambda_color
         # Identity loss
         if lambda_idt > 0:
             # G_A should be identity if real_B is fed: ||G_A(B) - B||
@@ -197,20 +205,23 @@ class CycleGANLpipsModel(BaseModel):
             # G_B should be identity if real_A is fed: ||G_B(A) - A||
             self.idt_B = self.netG_B(self.real_A)
             self.loss_idt_B = self.criterionIdt(self.idt_B, self.real_A) * lambda_A * lambda_idt
-        else:
-            self.loss_idt_A = 0
-            self.loss_idt_B = 0
 
         # GAN loss D_A(G_A(A))
         self.loss_G_A = self.criterionGAN(self.netD_A(self.fake_B), True)
-        self.loss_G_A_Con = self.criterionLpips(self.real_A, self.fake_B).mean() * lambda_Con
-        self.loss_G_A_Gra = self.criterionGram(self.fake_B, self.real_B) * lambda_Gra
-        self.loss_G_A_Col = self.criterionColor(self.real_A, self.fake_B) * lambda_Col
         # GAN loss D_B(G_B(B))
         self.loss_G_B = self.criterionGAN(self.netD_B(self.fake_A), True)
-        self.loss_G_B_Con = self.criterionLpips(self.real_B, self.fake_A).mean() * lambda_Con
-        self.loss_G_B_Gra = self.criterionGram(self.fake_A, self.real_A) * lambda_Gra
-        self.loss_G_B_Col = self.criterionColor(self.real_B, self.fake_A) * lambda_Col
+        # Perceptual Loss
+        if lambda_content > 0:
+            self.loss_G_A_Content = self.criterionContent(self.real_A, self.fake_B).mean() * lambda_content
+            self.loss_G_B_Content = self.criterionContent(self.real_B, self.fake_A).mean() * lambda_content
+        # Grayscale Gram-based style loss
+        if lambda_style > 0:
+            self.loss_G_A_Style = self.criterionStyle(self.fake_B, self.real_B) * lambda_style
+            self.loss_G_B_Style = self.criterionStyle(self.fake_A, self.real_A) * lambda_style
+        # Color loss
+        if lambda_color > 0:
+            self.loss_G_A_Color = self.criterionColor(self.real_A, self.fake_B) * lambda_color
+            self.loss_G_B_Color = self.criterionColor(self.real_B, self.fake_A) * lambda_color
         # Forward cycle loss || G_B(G_A(A)) - A||
         self.loss_cycle_A = self.criterionCycle(self.rec_A, self.real_A) * lambda_A
         # Backward cycle loss || G_A(G_B(B)) - B||
@@ -218,13 +229,13 @@ class CycleGANLpipsModel(BaseModel):
         # combined loss and calculate gradients
         self.loss_G = sum((
             self.loss_G_A,
-            self.loss_G_A_Con,
-            self.loss_G_A_Gra,
-            self.loss_G_A_Col,
+            self.loss_G_A_Content,
+            self.loss_G_A_Style,
+            self.loss_G_A_Color,
             self.loss_G_B,
-            self.loss_G_B_Con,
-            self.loss_G_B_Gra,
-            self.loss_G_B_Col,
+            self.loss_G_B_Content,
+            self.loss_G_B_Style,
+            self.loss_G_B_Color,
             self.loss_cycle_A,
             self.loss_cycle_B,
             self.loss_idt_A,

@@ -1,23 +1,13 @@
-FROM nvidia/cuda:11.6.2-devel-ubuntu18.04
+FROM pytorch/pytorch:2.0.0-cuda11.7-cudnn8-runtime
 
-ENV PATH="/root/miniconda3/bin:${PATH}"
-ARG PATH="/root/miniconda3/bin:${PATH}"
-RUN apt-get update
+RUN apt-get update && apt install -qqy git && apt clean  # used by some MLFlow features
 
-RUN apt-get install -y wget gcc build-essential && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir -U pip
 
-RUN wget \
-    https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh \
-    && mkdir /root/.conda \
-    && bash Miniconda3-latest-Linux-x86_64.sh -b \
-    && rm -f Miniconda3-latest-Linux-x86_64.sh
-RUN conda --version
+WORKDIR /CycleGAN
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-WORKDIR /app
-COPY environment.yml .
-RUN conda config --env --set always_yes true
-RUN conda env create -f environment.yml
-RUN /root/miniconda3/envs/CycleGAN/bin/python -m pip install torchtriton --extra-index-url "https://download.pytorch.org/whl/nightly/cu117"
+COPY . .
 
-RUN conda init bash
 CMD ["bash"]
