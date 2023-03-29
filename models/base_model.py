@@ -192,7 +192,7 @@ class BaseModel(ABC):
                 if (isinstance(net, torch.nn.DataParallel)
                         or isinstance(net, torch._dynamo.OptimizedModule)):
                     net = net.module
-                mlflow.pytorch.log_model(net, f"{epoch}_net_{name}")
+                mlflow.pytorch.log_state_dict(net.state_dict(), f"{epoch}_net_{name}")
 
     def load_networks(self, epoch):
         """Load all the networks from the disk.
